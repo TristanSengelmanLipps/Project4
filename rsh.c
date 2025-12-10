@@ -105,6 +105,7 @@ int main(int argc, char **argv) {
     char line[256];
     int status;
     posix_spawnattr_t attr;
+	pthread_t listener;
 
     if (argc!=2) {
 	printf("Usage: ./rsh <username>\n");
