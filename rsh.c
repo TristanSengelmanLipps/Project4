@@ -6,6 +6,7 @@
 #include <string.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <signal.h>
 
 #define N 13
 
@@ -27,33 +28,63 @@ void terminate(int sig) {
 }
 
 void sendmsg (char *user, char *target, char *msg) {
-	// TODO:
-	// Send a request to the server to send the message (msg) to the target user (target)
-	// by creating the message structure and writing it to server's FIFO
+	int serverfd;
+	struct message m;
 
+	// open server FIFO for writing
+	serverfd = open("serverFIFO", O_WRONLY);
+	if (serverfd < 0) {
+		perror("open serverFIFO");
+		return;
+	}
 
+	// fill the message struct
+	strncpy(m.source, user, sizeof(m.source) - 1);
+	m.source[sizeof(m.source) - 1] = '\0';
 
+	strncpy(m.target, target, sizeof(m.target) - 1);
+	m.target[sizeof(m.target) - 1] = '\0';
 
+	strncpy(m.msg, msg, sizeof(m.msg) - 1);
+	m.msg[sizeof(m.msg) - 1] = '\0';
 
+	// write the entire struct to the server FIFO
+	(void)write(serverfd, &m, sizeof(struct message));
 
-
-
+	close(serverfd);
 }
 
 void* messageListener(void *arg) {
-	// TODO:
-	// Read user's own FIFO in an infinite loop for incoming messages
-	// The logic is similar to a server listening to requests
-	// print the incoming message to the standard output in the
-	// following format
-	// Incoming message from [source]: [message]
-	// put an end of line at the end of the message
+	int userfd, dummyfd;
+	struct message m;
 
+	// open this user's FIFO for reading, plus a dummy writer
+	userfd = open(uName, O_RDONLY);
+	if (userfd < 0) {
+		perror("open user fifo");
+		pthread_exit((void*)0);
+	}
 
+	// dummy writer to keep FIFO from hitting EOF when no other writers
+	dummyfd = open(uName, O_WRONLY);
+	if (dummyfd < 0) {
+		// not fatal; but messages may EOF when no writers
+		perror("open dummy user fifo");
+	}
 
+	while (1) {
+		ssize_t n = read(userfd, &m, sizeof(struct message));
+		if (n <= 0) {
+			// read error or EOF; just continue waiting
+			continue;
+		}
 
+		printf("Incoming message from %s: %s\n", m.source, m.msg);
+		fflush(stdout);
+	}
 
-
+	close(userfd);
+	close(dummyfd);
 	pthread_exit((void*)0);
 }
 
@@ -83,12 +114,10 @@ int main(int argc, char **argv) {
 
     strcpy(uName,argv[1]);
 
-    // TODO:
-    // create the message listener thread
-
-
-
-
+	if (pthread_create(&listener, NULL, messageListener, NULL) != 0) {
+		perror("pthread_create");
+		exit(1);
+	}
 
     while (1) {
 
@@ -111,27 +140,34 @@ int main(int argc, char **argv) {
 	}
 
 	if (strcmp(cmd,"sendmsg")==0) {
-		// TODO: Create the target user and
-		// the message string and call the sendmsg function
+		char* target = strtok(NULL, " ");   // second token
+		if (target == NULL) {
+			printf("sendmsg: you have to specify target user\n");
+			continue;
+		}
 
-		// NOTE: The message itself can contain spaces
-		// If the user types: "sendmsg user1 hello there"
-		// target should be "user1" 
-		// and the message should be "hello there"
+		char* tok = strtok(NULL, " ");     // first word of message
+		if (tok == NULL) {
+			printf("sendmsg: you have to enter a message\n");
+			continue;
+		}
 
-		// if no argument is specified, you should print the following
-		// printf("sendmsg: you have to specify target user\n");
-		// if no message is specified, you should print the followingA
- 		// printf("sendmsg: you have to enter a message\n");
+		char msg[200];
+		// build message string from remaining tokens with spaces
+		strncpy(msg, tok, sizeof(msg) - 1);
+		msg[sizeof(msg) - 1] = '\0';
 
+		while ((tok = strtok(NULL, " ")) != NULL) {
+			if (strlen(msg) + 1 + strlen(tok) + 1 >= sizeof(msg)) {
+				// avoid overflow; truncate extra
+				break;
+			}
+			strcat(msg, " ");
+			strcat(msg, tok);
+		}
 
-
-
-
-
-
-
-
+		// call the sendmsg helper with current user name
+		sendmsg(uName, target, msg);
 
 		continue;
 	}
